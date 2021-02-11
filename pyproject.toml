@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "package_name"
+version = "0.1.0"
+description = "Package description"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "INDEAVR"}
+authors = [
+	{name = "author name", email = "author_email@example.com"},
+]
+dependencies = [
+]
+
+[project.optional-dependencies]
+optional_dependency_name = [
+]
+
+[project.urls]
+homepage = "http://example.com"
+
+[project.scripts]
+
+[project.gui-scripts]
+
+[tool.setuptools.packages.find]
+# All the following settings are optional:
+where = ["."]  # ["."] by default
+include = ["*"]  # ["*"] by default
+exclude = ["tests", "utils"]  # empty by default
+namespaces = false  # true by default
+
+[tool.pylint.main]
+ignore = "tests"
+jobs = 4
+
+[tool.pylint."messages control"]
+disable = [
+	"wildcard-import",
+	"trailing-newlines",
+	"use-dict-literal",
+]
+
+good-names = [
+	"i",
+	"j",
+	"k",
+	"ex",
+	"Run",
+	"_",
+	"pd",
+	"df",
+	"ok",
+]
+
