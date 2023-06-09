@@ -1,10 +1,11 @@
-#	(Project name)
+#	Resource Allocator Client
 
 ##	Description
-Let people know what your project can do specifically. Provide context and add a link to any
-reference visitors might be unfamiliar with. A list of Features or a Background subsection can also
-be added here. If there are alternatives to your project, this is a good place to list
-differentiating factors. 
+This repository contains a command-line client to the [Resource Allocator] project. Main features:
+
+* user creation and logging in with token caching
+* configuration files
+* OOP interface
 
 
 ##	Installation
