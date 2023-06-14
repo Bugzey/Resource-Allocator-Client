@@ -35,14 +35,14 @@ class CacheTestCase(unittest.TestCase):
     def test_init(self):
         self.assertIsNone(self.cache.token)
         self.assertEqual(self.cache.server, "test")
-        self.assertEqual(str(self.cache.path), "test")
+        self.assertEqual(str(self.cache.path), "test.json")
 
     def test_write(self):
         self.cache.token = "123"
         self.cache._paths[0] = Path(self.temp_dir.name)
         self.cache.write()
 
-        file_path = Path(self.temp_dir.name) / "test"
+        file_path = Path(self.temp_dir.name) / "test.json"
         self.assertTrue(file_path.exists())
         with open(file_path) as cur_file:
             data = cur_file.read()
