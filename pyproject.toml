@@ -3,16 +3,17 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "package_name"
+name = "resource_allocator_client"
 version = "0.1.0"
-description = "Package description"
+description = "Command-line client to query the Resource-Allocator API application"
 readme = "README.md"
-requires-python = ">=3.9"
-license = {text = "INDEAVR"}
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
 authors = [
-	{name = "author name", email = "author_email@example.com"},
+	{name = "Bugzey", email = "radddi@abv.bg"},
 ]
 dependencies = [
+	"requests",
 ]
 
 [project.optional-dependencies]
@@ -20,9 +21,10 @@ optional_dependency_name = [
 ]
 
 [project.urls]
-homepage = "http://example.com"
+homepage = "https://github.com/Bugzey/Resource-Allocator"
 
 [project.scripts]
+resource_allocator_client = "resource_allocator_client.main:main"
 
 [project.gui-scripts]
 
@@ -49,6 +51,7 @@ good-names = [
 	"j",
 	"k",
 	"ex",
+	"id",
 	"Run",
 	"_",
 	"pd",
