@@ -118,9 +118,8 @@ class Client:
             json = data,
         )
         if not result.ok:
-            message = f"Error making the request. Status: {result.status_code}, json: {result.json()}"
-            logger.error(message)
-            raise RuntimeError(message)
+            logger.error(f"Request returned a non-ok exit status: {result.status_code}")
+            logger.info(f"Error details: {result.json()}")
 
         return result.json()
 
@@ -198,10 +197,14 @@ class Client:
         """
         items = self.list_items(endpoint)
         return [
-            item for item in items if all((item.get(key) == value for key, value in data.items()))
+            item for item in items
+            if all((
+                str(item.get(key)).casefold() == str(value).casefold()
+                for key, value in data.items()
+            ))
         ]
 
-    def create(self, **data) -> dict[str, Any]:
+    def create(self, endpoint: str, **data) -> dict[str, Any]:
         query_result = self.query(endpoint=endpoint, **data)
         if query_result:
             return query_result[0]
@@ -210,10 +213,12 @@ class Client:
         return result
 
     def update(self, endpoint: str, id: int, **data) -> None:
-        raise NotImplementedError()
+        result = self._make_request(method="PUT", endpoint=endpoint, id=id, **data)
+        return result
 
     def delete(self, endpoint: str, id: int) -> None:
-        raise NotImplementedError()
+        result = self._make_request(method="DELETE", endpoint=endpoint, id=id)
+        return result
 
 
 class Formatter:
@@ -239,21 +244,57 @@ def make_parser() -> ArgumentParser:
     parser.add_argument("-p", "--password")
     parser.add_argument("-a", "--azure-login", action="store_true")
     #parser.add_argument("-c", "--config")
+    parser.add_argument("endpoint", nargs=1, choices=[
+        "resources", "resource_groups", "resource_to_group", "iterations", "requests", "allocation",
+    ])
 
     #   Command subparsers
-    endpoint_kwargs = dict(dest="endpoint", choices=["resources"])
+    data_kwargs = dict(dest="data", nargs="*", metavar="KEY=VALUE")
     subparsers = parser.add_subparsers(
         title="subcommands",
         dest="action",
+        required=True,
     )
     list_subparser = subparsers.add_parser("list")
-    list_subparser.add_argument(**endpoint_kwargs)
 
     get_subparser = subparsers.add_parser("get")
-    get_subparser.add_argument(**endpoint_kwargs)
     get_subparser.add_argument("id")
 
+    create_subparser = subparsers.add_parser("create")
+    create_subparser.add_argument(**data_kwargs)
+
+    delete_subparser = subparsers.add_parser("delete")
+    delete_subparser.add_argument("id")
+
+    update_subparser = subparsers.add_parser("update")
+    update_subparser.add_argument("id")
+    update_subparser.add_argument(**data_kwargs)
+
+    query_subparser = subparsers.add_parser("query")
+    query_subparser.add_argument(**data_kwargs)
+
     return parser
+
+
+def parse_data_args(args: list[str]) -> dict[str, str]:
+    """
+    Parser key-value paired data args returned by the argument parser
+
+    Args:
+        args: list[str]: list of strings in the form KEY=VALUE
+
+    Returns:
+        dict[str, str]
+    """
+    result = {}
+    for item in args:
+        if "=" not in item:
+            raise ValueError(f"Invalid input. Expect KEY=VALUE. Got: {item}")
+
+        cur_items = item.split("=", maxsplit=1)
+        result[cur_items[0].strip()] = cur_items[1].strip()
+
+    return result
 
 
 def main() -> None:
@@ -269,6 +310,12 @@ def main() -> None:
     args = make_parser().parse_args()
     if not args.password and not args.azure_login:
         args.password = getpass(f"Password for {args.email}: ")
+
+    #   Postprocess args
+    args.endpoint = args.endpoint[0]
+
+    if "data" in dir(args):
+        args.data = parse_data_args(args.data)
 
     formatter = JsonFormatter()
 
@@ -286,6 +333,18 @@ def main() -> None:
 
     elif args.action == "get":
         formatter.format(client.get(endpoint=args.endpoint, id=args.id))
+
+    elif args.action == "query":
+        formatter.format(client.query(endpoint=args.endpoint, **args.data))
+
+    elif args.action == "create":
+        formatter.format(client.create(endpoint=args.endpoint, **args.data))
+
+    elif args.action == "delete":
+        formatter.format(client.delete(endpoint=args.endpoint, id=args.id))
+
+    elif args.action == "update":
+        formatter.format(client.update(endpoint=args.endpoint, id=args.id, **args.data))
 
     else:
         raise ValueError(f"Invalid action: {args.action}")

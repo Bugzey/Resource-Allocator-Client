@@ -57,3 +57,35 @@ class CacheTestCase(unittest.TestCase):
         result = self.cache.read()
         self.assertEqual(result, {"server": self.cache.server, "token": "123"})
         self.assertEqual(self.cache.token, "123")
+
+
+class MakeParserTestCase(unittest.TestCase):
+    def setUp(self):
+        self.parser = make_parser()
+        self.base_args = ["-s", "test", "-e", "test@example.com", "resources"]
+
+    def test_create(self):
+        result = self.parser.parse_args([
+            *self.base_args,
+            "create", "name=bla", "top_resource_group_id=99", "invalid key=99%''\"====12",
+            "quoted_text=\"there once was a time\"",
+        ])
+        self.assertEqual(result.action, "create")
+        self.assertNotIn("id", dir(result))
+        self.assertTrue(isinstance(result.data, list))
+        self.assertTrue(isinstance(result.data[0], str))
+        self.assertEquals(result.data[0], "name=bla")
+
+
+class ParseDataArgsTestCase(unittest.TestCase):
+    def test_parse_data_args(self):
+        result = parse_data_args(["key=value", " other key = value ", "some key bla %'\"==invalid123"])
+        self.assertEqual(result, {
+            "key": "value",
+            "other key": "value",
+            "some key bla %'\"": "=invalid123",
+        })
+
+    def test_parse_data_args_no_equals(self):
+        with self.assertRaises(ValueError):
+            result = parse_data_args(["no equals"])
