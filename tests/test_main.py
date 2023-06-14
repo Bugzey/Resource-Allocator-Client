@@ -62,13 +62,13 @@ class CacheTestCase(unittest.TestCase):
 class MakeParserTestCase(unittest.TestCase):
     def setUp(self):
         self.parser = make_parser()
-        self.base_args = ["-s", "test", "-e", "test@example.com", "resources"]
+        self.base_args = ["-s", "test", "-e", "test@example.com"]
 
     def test_create(self):
         result = self.parser.parse_args([
             *self.base_args,
-            "create", "name=bla", "top_resource_group_id=99", "invalid key=99%''\"====12",
-            "quoted_text=\"there once was a time\"",
+            "create", "resources", "name=bla", "top_resource_group_id=99",
+            "invalid key=99%''\"====12", "quoted_text=\"there once was a time\"",
         ])
         self.assertEqual(result.action, "create")
         self.assertNotIn("id", dir(result))

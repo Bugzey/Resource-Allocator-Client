@@ -1,5 +1,7 @@
 """
 Resource Allocator Client
+
+Command-line client to query the Resource-Allocator API application
 """
 
 from abc import abstractmethod
@@ -123,7 +125,7 @@ class Client:
 
         return result.json()
 
-    def register(self, method: str, **data) -> dict[str, Any]:
+    def register(self, **data) -> dict[str, Any]:
         """
         Register in a server using email-password login OR Azure Active Directory login
 
@@ -131,9 +133,32 @@ class Client:
             method: str: email or azure
             data: keyword arguments to pass on
         """
+        if self.azure_login:
+            return self._register_azure(**data)
+
+        return self._register_email(**data)
+
+    def _register_azure(self, **data) -> dict[str, Any]:
         raise NotImplementedError()
 
-    def login(self) -> None:
+    def _register_email(self, **data) -> dict[str, Any]:
+        result = self._make_request(
+            method="POST",
+            endpoint="register",
+            email=self.email,
+            password=self.password,
+            **data,
+        )
+        if "token" not in result:
+            logger.error("Bad register result")
+            return result
+
+        self.token = result["token"]
+        self.cache.token = self.token
+        self.cache.write()
+        return result
+
+    def login(self) -> dict[str, Any]:
         """
         Log into an instance using email-password login or Azure Active Directory login
 
@@ -171,6 +196,7 @@ class Client:
         self.token = login_finish["token"]
         self.cache.token = self.token
         self.cache.write()
+        return login_finish
 
     def _login_email(self, email: str, password: str) -> dict[str, Any]:
         result = self._make_request(
@@ -179,9 +205,14 @@ class Client:
             email=email,
             password=password,
         )
+        if "token" not in result:
+            logger.error(f"Bad log-in response")
+            return result
+
         self.token = result["token"]
         self.cache.token = self.token
         self.cache.write()
+        return result
 
     def list_items(self, endpoint: str) -> dict[str, Any]:
         result = self._make_request(method = "GET", endpoint=endpoint)
@@ -237,40 +268,67 @@ class JsonFormatter(Formatter):
 def make_parser() -> ArgumentParser:
     """
     Create the argument parser for the program
+
+    Args:
+        None
+
+    Returns:
+        ArgumentParser
     """
-    parser = ArgumentParser(prog="resource_allocator_client")
-    parser.add_argument("-s", "--server", required=True)
-    parser.add_argument("-e", "--email", required=True)
-    parser.add_argument("-p", "--password")
-    parser.add_argument("-a", "--azure-login", action="store_true")
-    #parser.add_argument("-c", "--config")
-    parser.add_argument("endpoint", nargs=1, choices=[
-        "resources", "resource_groups", "resource_to_group", "iterations", "requests", "allocation",
-    ])
+    parser = ArgumentParser(
+        prog="resource_allocator_client",
+        description="Command-line client to query the Resource-Allocator API application",
+    )
+    parser.add_argument("-s", "--server", required=True, help="Server address")
+    parser.add_argument("-e", "--email", required=True, help="User email")
+    parser.add_argument("-p", "--password", help="User password. Leave blank for interactive entry")
+    parser.add_argument("-a", "--azure-login", action="store_true", help="Log-in via Azure AD")
+    #parser.add_argument("-c", "--config", help="Path to a configuration file")
 
     #   Command subparsers
-    data_kwargs = dict(dest="data", nargs="*", metavar="KEY=VALUE")
+    endpoint_kwargs = dict(dest="endpoint", nargs=1, choices=[
+        "resources", "resource_groups", "resource_to_group", "iterations", "requests", "allocation",
+    ])
+    data_kwargs = dict(
+        dest="data",
+        nargs="*",
+        metavar="KEY=VALUE",
+        help="Key-value pairs to create, update or query",
+    )
+    id_kwargs = dict(dest="id", help="ID of the item")
+
     subparsers = parser.add_subparsers(
         title="subcommands",
         dest="action",
         required=True,
     )
+    register_subparser = subparsers.add_parser("register")
+    register_subparser.add_argument(**data_kwargs)
+
+    login_subparser = subparsers.add_parser("login")
+
     list_subparser = subparsers.add_parser("list")
+    list_subparser.add_argument(**endpoint_kwargs)
 
     get_subparser = subparsers.add_parser("get")
-    get_subparser.add_argument("id")
+    get_subparser.add_argument(**endpoint_kwargs)
+    get_subparser.add_argument(**id_kwargs)
 
     create_subparser = subparsers.add_parser("create")
+    create_subparser.add_argument(**endpoint_kwargs)
     create_subparser.add_argument(**data_kwargs)
 
     delete_subparser = subparsers.add_parser("delete")
-    delete_subparser.add_argument("id")
+    delete_subparser.add_argument(**endpoint_kwargs)
+    delete_subparser.add_argument(**id_kwargs)
 
     update_subparser = subparsers.add_parser("update")
-    update_subparser.add_argument("id")
+    update_subparser.add_argument(**endpoint_kwargs)
+    update_subparser.add_argument(**id_kwargs)
     update_subparser.add_argument(**data_kwargs)
 
     query_subparser = subparsers.add_parser("query")
+    query_subparser.add_argument(**endpoint_kwargs)
     query_subparser.add_argument(**data_kwargs)
 
     return parser
@@ -312,10 +370,11 @@ def main() -> None:
         args.password = getpass(f"Password for {args.email}: ")
 
     #   Postprocess args
-    args.endpoint = args.endpoint[0]
-
     if "data" in dir(args):
         args.data = parse_data_args(args.data)
+
+    if "endpoint" in dir(args):
+        args.endpoint = args.endpoint[0]
 
     formatter = JsonFormatter()
 
@@ -326,9 +385,16 @@ def main() -> None:
         azure_login=args.azure_login,
     )
 
-    client.login()
+    if args.action == "register":
+        formatter.format(client.register(**args.data))
+        return
 
-    if args.action == "list":
+    login_result = client.login()
+
+    if args.action == "login":
+        formatter.format(login_result)
+
+    elif args.action == "list":
         formatter.format(client.list_items(endpoint=args.endpoint))
 
     elif args.action == "get":
