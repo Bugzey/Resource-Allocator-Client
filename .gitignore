@@ -146,3 +146,5 @@ cython_debug/
 # CMD shell files
 *.cmd
 
+# Cached json files
+/*.json
