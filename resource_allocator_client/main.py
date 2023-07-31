@@ -6,6 +6,7 @@ Command-line client to query the Resource-Allocator API application
 
 from abc import abstractmethod
 from argparse import ArgumentParser
+import base64
 from dataclasses import dataclass
 from getpass import getpass
 import json
@@ -20,6 +21,9 @@ import requests as req
 
 
 logger = logging.getLogger(__name__)
+
+
+class APIError(Exception): ...
 
 
 class CallbackServer(HTTPServer):
@@ -164,8 +168,16 @@ class Client:
             timeout=60,
         )
         if not result.ok:
-            logger.error(f"Request returned a non-ok exit status: {result.status_code}")
-            logger.info(f"Error details: {result.json()}")
+            try:
+                content = result.json()
+            except Exception:
+                content = result.content
+
+            message = (
+                f"Request returned a non-ok exit status: {result.status_code}: "
+                f"{content}"
+            )
+            raise APIError(message)
 
         return result.json()
 
@@ -371,94 +383,168 @@ class JsonFormatter(Formatter):
         print(json.dumps(output, indent=2))
 
 
-def make_parser() -> ArgumentParser:
+class HasSubparsers:
     """
-    Create the argument parser for the program
-
-    Args:
-        None
-
-    Returns:
-        ArgumentParser
+    Typing helper
     """
-    parser = ArgumentParser(
-        prog="resource_allocator_client",
-        description="Command-line client to query the Resource-Allocator API application",
-    )
-    parser.add_argument("-s", "--server", required=True, help="Server address")
-    parser.add_argument("-e", "--email", required=True, help="User email")
-    parser.add_argument("-p", "--password", help="User password. Leave blank for interactive entry")
-    parser.add_argument("-a", "--azure-login", action="store_true", help="Log-in via Azure AD")
-    #parser.add_argument("-c", "--config", help="Path to a configuration file")
+    def add_parser(self) -> ArgumentParser: ...
 
+
+class Parser:
     #   Command subparsers
-    endpoint_kwargs = dict(dest="endpoint", nargs=1, choices=[
-        "resources", "resource_groups", "resource_to_group", "iterations", "requests", "allocation",
-    ])
-    data_kwargs = dict(
+    _endpoint_kwargs = dict(
+        dest="endpoint",
+        nargs=1,
+        choices=[
+            "allocation",
+            "images",
+            "image_properties",
+            "iterations",
+            "requests",
+            "resource_groups",
+            "resource_to_group",
+            "resources",
+        ],
+    )
+    _data_kwargs = dict(
         dest="data",
         nargs="*",
         metavar="KEY=VALUE",
         help="Key-value pairs to create, update or query",
     )
-    id_kwargs = dict(dest="id", help="ID of the item")
+    _id_kwargs = dict(dest="id", help="ID of the item")
 
-    subparsers = parser.add_subparsers(
-        title="subcommands",
-        dest="action",
-        required=True,
-    )
-    register_subparser = subparsers.add_parser("register")
-    register_subparser.add_argument(**data_kwargs)
+    @classmethod
+    def make_parser(cls) -> ArgumentParser:
+        """
+        Create the argument parser for the program
 
-    _ = subparsers.add_parser("login")
+        Args:
+            None
 
-    list_subparser = subparsers.add_parser("list")
-    list_subparser.add_argument(**endpoint_kwargs)
+        Returns:
+            ArgumentParser
+        """
+        parser = ArgumentParser(
+            prog="resource_allocator_client",
+            description="Command-line client to query the Resource-Allocator API application",
+        )
+        parser.add_argument("-s", "--server", required=True, help="Server address")
+        parser.add_argument("-e", "--email", required=True, help="User email")
+        parser.add_argument(
+            "-p",
+            "--password",
+            help="User password. Leave blank for interactive entry",
+        )
+        parser.add_argument("-a", "--azure-login", action="store_true", help="Log-in via Azure AD")
+        #parser.add_argument("-c", "--config", help="Path to a configuration file")
 
-    get_subparser = subparsers.add_parser("get")
-    get_subparser.add_argument(**endpoint_kwargs)
-    get_subparser.add_argument(**id_kwargs)
+        subparsers = parser.add_subparsers(
+            title="subcommands",
+            dest="action",
+            required=True,
+        )
 
-    create_subparser = subparsers.add_parser("create")
-    create_subparser.add_argument(**endpoint_kwargs)
-    create_subparser.add_argument(**data_kwargs)
+        #   Add separate subparsers
+        _ = cls._add_register(subparsers)
+        _ = cls._add_login(subparsers)
+        _ = cls._add_list(subparsers)
+        _ = cls._add_get(subparsers)
+        _ = cls._add_create(subparsers)
+        _ = cls._add_delete(subparsers)
+        _ = cls._add_update(subparsers)
+        _ = cls._add_query(subparsers)
+        return parser
 
-    delete_subparser = subparsers.add_parser("delete")
-    delete_subparser.add_argument(**endpoint_kwargs)
-    delete_subparser.add_argument(**id_kwargs)
+    @classmethod
+    def _add_register(cls, subparsers: HasSubparsers) -> ArgumentParser:
+        parser = subparsers.add_parser("register")
+        parser.add_argument(**cls._data_kwargs)
+        return parser
 
-    update_subparser = subparsers.add_parser("update")
-    update_subparser.add_argument(**endpoint_kwargs)
-    update_subparser.add_argument(**id_kwargs)
-    update_subparser.add_argument(**data_kwargs)
+    @classmethod
+    def _add_login(cls, subparsers: HasSubparsers) -> ArgumentParser:
+        parser = subparsers.add_parser("login")
+        return parser
 
-    query_subparser = subparsers.add_parser("query")
-    query_subparser.add_argument(**endpoint_kwargs)
-    query_subparser.add_argument(**data_kwargs)
+    @classmethod
+    def _add_list(cls, subparsers: HasSubparsers) -> ArgumentParser:
+        parser = subparsers.add_parser("list")
+        parser.add_argument(**cls._endpoint_kwargs)
+        return parser
 
-    return parser
+    @classmethod
+    def _add_get(cls, subparsers: HasSubparsers) -> ArgumentParser:
+        parser = subparsers.add_parser("get")
+        parser.add_argument(**cls._endpoint_kwargs)
+        parser.add_argument(**cls._id_kwargs)
+        return parser
 
+    @classmethod
+    def _add_create(cls, subparsers: HasSubparsers) -> ArgumentParser:
+        parser = subparsers.add_parser("create")
+        parser.add_argument(**cls._endpoint_kwargs)
+        parser.add_argument(**cls._data_kwargs)
+        return parser
 
-def parse_data_args(args: list[str]) -> dict[str, str]:
-    """
-    Parser key-value paired data args returned by the argument parser
+    @classmethod
+    def _add_delete(cls, subparsers: HasSubparsers) -> ArgumentParser:
+        parser = subparsers.add_parser("delete")
+        parser.add_argument(**cls._endpoint_kwargs)
+        parser.add_argument(**cls._id_kwargs)
+        return parser
 
-    Args:
-        args: list[str]: list of strings in the form KEY=VALUE
+    @classmethod
+    def _add_update(cls, subparsers: HasSubparsers) -> ArgumentParser:
+        parser = subparsers.add_parser("update")
+        parser.add_argument(**cls._endpoint_kwargs)
+        parser.add_argument(**cls._id_kwargs)
+        parser.add_argument(**cls._data_kwargs)
+        return parser
 
-    Returns:
-        dict[str, str]
-    """
-    result = {}
-    for item in args:
-        if "=" not in item:
-            raise ValueError(f"Invalid input. Expect KEY=VALUE. Got: {item}")
+    @classmethod
+    def _add_query(cls, subparsers: HasSubparsers) -> ArgumentParser:
+        parser = subparsers.add_parser("query")
+        parser.add_argument(**cls._endpoint_kwargs)
+        parser.add_argument(**cls._data_kwargs)
+        return parser
 
-        cur_items = item.split("=", maxsplit=1)
-        result[cur_items[0].strip()] = cur_items[1].strip()
+    @classmethod
+    def parse_data_args(cls, args: list[str]) -> dict[str, str]:
+        """
+        Parser key-value paired data args returned by the argument parser
 
-    return result
+        Args:
+            args: list[str]: list of strings in the form KEY=VALUE
+
+        Returns:
+            dict[str, str]
+        """
+        result = {}
+        for item in args:
+            if "=" not in item:
+                raise ValueError(f"Invalid input. Expect KEY=VALUE. Got: {item}")
+
+            key, value = item.split("=", maxsplit=1)
+            key = key.strip()
+            value = value.strip()
+
+            if value.casefold() in ("yes", "true"):
+                value = True
+            elif value.casefold() in ("no", "false"):
+                value = False
+            elif value.isnumeric():
+                value = int(value)
+            elif "=" in value:
+                value = parse_data_args(value.split(","))
+            elif key == "image":
+                with open(value, "rb") as cur_file:
+                    value = cur_file.read()
+                    value = base64.b64encode(value).decode("utf-8")
+
+            result[key] = value
+
+        return result
 
 
 def main() -> None:
@@ -471,13 +557,15 @@ def main() -> None:
     Returns:
         None
     """
-    args = make_parser().parse_args()
+    parser_factory = Parser()
+    parser = parser_factory.make_parser()
+    args = parser.parse_args()
     if not args.password and not args.azure_login:
         args.password = getpass(f"Password for {args.email}: ")
 
     #   Postprocess args
     if "data" in dir(args):
-        args.data = parse_data_args(args.data)
+        args.data = parser_factory.parse_data_args(args.data)
 
     if "endpoint" in dir(args):
         args.endpoint = args.endpoint[0]

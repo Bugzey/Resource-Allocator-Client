@@ -79,12 +79,42 @@ class MakeParserTestCase(unittest.TestCase):
 
 class ParseDataArgsTestCase(unittest.TestCase):
     def test_parse_data_args(self):
-        result = parse_data_args(["key=value", " other key = value ", "some key bla %'\"==invalid123"])
-        self.assertEqual(result, {
-            "key": "value",
-            "other key": "value",
-            "some key bla %'\"": "=invalid123",
-        })
+        result = parse_data_args([
+            "key=value",
+            " other key = value ",
+            "some key bla %'\"==invalid123",
+        ])
+        self.assertEqual(
+            result, {
+                "key": "value",
+                "other key": "value",
+                "some key bla %'\"": "=invalid123",
+            },
+        )
+
+    def test_parse_data_args_special(self):
+        result = parse_data_args([
+            "bool_yes=yes",
+            "bool_no=no",
+            "bool_true=true",
+            "bool_false =false",
+            "int =123",
+            "dict=bla=true,other=bla",
+        ])
+        self.assertEqual(
+            result,
+            {
+                "bool_yes": True,
+                "bool_no": False,
+                "bool_true": True,
+                "bool_false" : False,
+                "int": 123,
+                "dict": {
+                    "bla": True,
+                    "other": "bla",
+                },
+            },
+        )
 
     def test_parse_data_args_no_equals(self):
         with self.assertRaises(ValueError):

@@ -131,6 +131,13 @@ options:
   -h, --help            show this help message and exit
 ```
 
+###	Special Keys
+Some attributes are handled in a different way depending on the key used. The keys are not limited
+to an action or to a resource type:
+
+* image - the input is a path to an image file. It is read and encoded in base64 before being sent
+  to the server
+
 
 ##	Contributing
 New functionality should be added via creating feature or bug fix branches and issuing a pull
