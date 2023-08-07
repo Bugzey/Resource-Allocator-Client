@@ -12,6 +12,8 @@ import webbrowser
 
 import requests as req
 
+from resource_allocator_client.callback import run_callback_server
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,6 +60,10 @@ class Client:
     """
     Resource Allocator Client class to handle all API operations
     """
+
+    redirect_hostname = "localhost"
+    redirect_port = 8080
+
     def __init__(
         self,
         server: str,
@@ -94,6 +100,7 @@ class Client:
         method: str,
         endpoint: str,
         id: int | None = None,
+        params: dict | None = None,
         **data,
     ) -> req.PreparedRequest:
         """
@@ -118,6 +125,7 @@ class Client:
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.cache.token}",
             },
+            params=params,
             json=data,
             timeout=60,
         )
@@ -185,12 +193,12 @@ class Client:
         return self._login_email(email=self.email, password=self.password)
 
     def _login_azure(self):
-        #   TODO: split later
-
         #   Get auth URL and redirect
+        redirect_uri = f"http://{self.redirect_hostname}:{self.redirect_port}"
         login_init = self._make_request(
             method="GET",
             endpoint="login_azure",
+            params={"redirect_uri": redirect_uri},
         )
         auth_url = login_init["auth_url"]
 
@@ -198,13 +206,14 @@ class Client:
         if not webbrowser.open(auth_url):
             print(f"Please visit the following URL: {auth_url}")
 
-        url = urlparse(input("Paste redirect URL: "))
-        code = parse_qs(url.query)["code"][0]
+        code = run_callback_server(hostname=self.redirect_hostname, port=self.redirect_port)
+
         login_finish = self._make_request(
             method="POST",
             endpoint="login_azure",
             code=code,
             email=self.email,
+            redirect_uri=redirect_uri,
         )
         self.cache.token = login_finish["token"]
         self.cache.write()
