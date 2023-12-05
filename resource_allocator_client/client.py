@@ -2,12 +2,12 @@
 Main Client class and Cache
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+import datetime as dt
 import json
 import logging
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse, parse_qs
 import webbrowser
 
 import requests as req
@@ -31,29 +31,46 @@ class Cache:
         token: str: token received by the server
     """
     server: str
+    email: str
     token: str = None
+    expires_at: dt.datetime = None
+    path: Path = None
 
-    _paths = [
-        Path("."),
-    ]
-
-    @property
-    def path(self):
-        return Path(self._paths[0]) / (self.server.replace("/", "") + ".json")
+    def __post_init__(self):
+        if not self.path:
+            self.path = Path(".") / (self.server.replace("/", "") + ".json")
+        else:
+            self.path = Path(self.path)
 
     def read(self):
         path = self.path
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as cur_path:
-                data = json.load(cur_path)
-            self.token = data["token"]
+        if not path.exists():
+            return
 
-        return data
+        with open(path, "r", encoding="utf-8") as cur_path:
+            data = json.load(cur_path)
+
+        expires_at = dt.datetime.fromisoformat(data["expires_at"])
+        if (
+            self.server == data["server"]
+            and self.email == data["email"]
+            and expires_at > dt.datetime.utcnow()
+        ):
+            self.token = data["token"]
+            self.expires_at = expires_at
+        else:
+            logger.info("Existing token expired")
 
     def write(self):
-        path = self.path
-        with open(path, "w", encoding="utf-8") as cur_path:
-            json.dump(self.__dict__, cur_path)
+        with open(self.path, "w", encoding="utf-8") as cur_file:
+            json.dump(asdict(self), cur_file)
+
+    def update_from_login(self, data: dict):
+        self.server = data["server"]
+        self.email = data["email"]
+        self.expires_at = dt.datetime.fromisoformat(data["expires_at"])
+        self.token = data["token"]
+        self.write()
 
 
 class Client:
@@ -93,7 +110,7 @@ class Client:
         self.email = email
         self.password = password
         self.azure_login = azure_login
-        self.cache = Cache(server=self.server)
+        self.cache = Cache(server=self.server, email=email)
 
     def _make_request(
         self,
@@ -187,10 +204,18 @@ class Client:
         Returns:
             dict[str, Any]: API response
         """
-        if self.azure_login:
-            return self._login_azure()
+        #   Try reading the cache
+        self.cache.read()
+        if self.cache.token:
+            logger.info("Using valid cache")
+            return
 
-        return self._login_email(email=self.email, password=self.password)
+        if self.azure_login:
+            result = self._login_azure()
+        else:
+            result = self._login_email(email=self.email, password=self.password)
+
+        self.cache.update_from_login(result)
 
     def _login_azure(self):
         #   Get auth URL and redirect
