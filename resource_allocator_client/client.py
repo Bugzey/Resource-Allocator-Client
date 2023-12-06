@@ -2,7 +2,7 @@
 Main Client class and Cache
 """
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 import datetime as dt
 import json
 import logging
@@ -48,27 +48,35 @@ class Cache:
             return
 
         with open(path, "r", encoding="utf-8") as cur_path:
-            data = json.load(cur_path)
+            try:
+                data = json.load(cur_path)
+            except Exception as e:
+                logger.error(f"Could not read cache: {e}")
 
         expires_at = dt.datetime.fromisoformat(data["expires_at"])
         if (
             self.server == data["server"]
             and self.email == data["email"]
-            and expires_at > dt.datetime.utcnow()
+            and expires_at > dt.datetime.now(tz=dt.timezone.utc)
         ):
             self.token = data["token"]
             self.expires_at = expires_at
         else:
-            logger.info("Existing token expired")
+            logger.info("Existing token expired or invalid")
 
     def write(self):
         with open(self.path, "w", encoding="utf-8") as cur_file:
-            json.dump(asdict(self), cur_file)
+            data = self.__dict__.copy()
+            data["path"] = str(data["path"])
+            data["expires_at"] = data["expires_at"].isoformat()
+            json.dump(data, cur_file)
 
     def update_from_login(self, data: dict):
-        self.server = data["server"]
-        self.email = data["email"]
-        self.expires_at = dt.datetime.fromisoformat(data["expires_at"])
+        self.expires_at = (
+            dt.datetime.fromisoformat(data["expires_at"])
+            if "expires_at" in data and data.get("expires_at")
+            else dt.datetime.now(tz=dt.timezone.utc) + dt.timedelta(hours=1)
+        )
         self.token = data["token"]
         self.write()
 
@@ -87,6 +95,7 @@ class Client:
         email: str,
         password: str | None = None,
         azure_login: bool = False,
+        cache_path: str | None = None,
     ):
         """
         Initialize the client. Either password or azure_login must be set
@@ -110,7 +119,7 @@ class Client:
         self.email = email
         self.password = password
         self.azure_login = azure_login
-        self.cache = Cache(server=self.server, email=email)
+        self.cache = Cache(server=self.server, email=email, path=cache_path)
 
     def _make_request(
         self,
@@ -171,9 +180,11 @@ class Client:
             dict[str, Any]: API response
         """
         if self.azure_login:
-            return self._register_azure(**data)
+            result = self._register_azure(**data)
+        else:
+            result = self._register_email(**data)
 
-        return self._register_email(**data)
+        self.cache.update_from_login(result)
 
     def _register_azure(self, **data) -> dict[str, Any]:
         raise NotImplementedError()
@@ -190,8 +201,6 @@ class Client:
             logger.error("Bad register result")
             return result
 
-        self.cache.token = result["token"]
-        self.cache.write()
         return result
 
     def login(self) -> dict[str, Any]:
@@ -240,8 +249,6 @@ class Client:
             email=self.email,
             redirect_uri=redirect_uri,
         )
-        self.cache.token = login_finish["token"]
-        self.cache.write()
         return login_finish
 
     def _login_email(self, email: str, password: str) -> dict[str, Any]:
@@ -255,8 +262,6 @@ class Client:
             logger.error("Bad log-in response")
             return result
 
-        self.cache.token = result["token"]
-        self.cache.write()
         return result
 
     def list_items(self, endpoint: str) -> list[dict[str, Any]]:

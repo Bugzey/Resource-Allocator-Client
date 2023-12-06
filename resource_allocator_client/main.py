@@ -80,13 +80,16 @@ class Parser:
         )
         parser.add_argument("-s", "--server", required=True, help="Server address")
         parser.add_argument("-e", "--email", required=True, help="User email")
-        parser.add_argument(
+
+        #   Auth group
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument(
             "-p",
             "--password",
             help="User password. Leave blank for interactive entry",
         )
-        parser.add_argument("-a", "--azure-login", action="store_true", help="Log-in via Azure AD")
-        # parser.add_argument("-c", "--config", help="Path to a configuration file")
+        group.add_argument("-a", "--azure-login", action="store_true", help="Log-in via Azure AD")
+        parser.add_argument("-c", "--cache", help="Path to a custom login cache file")
 
         subparsers = parser.add_subparsers(
             title="subcommands",
@@ -226,6 +229,7 @@ def main() -> None:
         email=args.email,
         password=args.password,
         azure_login=args.azure_login,
+        cache_path=args.cache,
     )
 
     if args.action == "register":
