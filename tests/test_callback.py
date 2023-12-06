@@ -14,8 +14,12 @@ class CallbackServerTestCase(unittest.TestCase):
         code_list = []
         thread = threading.Thread(
             target=run_callback_server,
-            kwargs={"code_list": code_list},
             daemon=True,
+            kwargs=dict(
+                hostname="localhost",
+                port=8080,
+                variable=code_list,
+            )
         )
         thread.start()
         response = req.get(url="http://localhost:8080", params={"code": "123"})

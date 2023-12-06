@@ -33,19 +33,24 @@ class CallbackHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-def run_callback_server(code_list: list) -> str:
+def run_callback_server(hostname: str, port: int, variable: list | None = None) -> str:
     """
     Function to start a CallbackServer in order to intercept an OAuth redirect from Azure Active
     Directory
 
     Args:
-        code_list: list object to mutate the code into
+        hostname: str: host name to bind to
+        port: int: port to bind to
+        variable: list: mutable list in which to insert the result. Used when running this function
+            in a thread [default: None]
 
     Returns:
         str: the code returned in the OAuth redirection
     """
-    CallbackHandler.code = code_list
-    with CallbackServer(("localhost", 8080), CallbackHandler) as httpd:
+    if variable is None:
+        variable = []
+    CallbackHandler.code = variable
+    with CallbackServer((hostname, port), CallbackHandler) as httpd:
         httpd.handle_request()
 
-    return code_list[0]
+    return variable[0]

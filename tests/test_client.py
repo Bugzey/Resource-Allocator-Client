@@ -2,6 +2,7 @@
 Tests for client
 """
 
+import datetime as dt
 from pathlib import Path
 import tempfile
 import unittest
@@ -14,8 +15,12 @@ from resource_allocator_client.client import (
 
 class CacheTestCase(unittest.TestCase):
     def setUp(self):
-        self.cache = Cache(server="test")
         self.temp_dir = tempfile.TemporaryDirectory()
+        self.cache = Cache(
+            server="test",
+            email="test@example.com",
+            path=Path(self.temp_dir.name) / "test.json",
+        )
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -23,11 +28,11 @@ class CacheTestCase(unittest.TestCase):
     def test_init(self):
         self.assertIsNone(self.cache.token)
         self.assertEqual(self.cache.server, "test")
-        self.assertEqual(str(self.cache.path), "test.json")
+        self.assertEqual(self.cache.path.name, "test.json")
 
     def test_write(self):
         self.cache.token = "123"
-        self.cache._paths[0] = Path(self.temp_dir.name)
+        self.cache.expires_at = dt.datetime.now(tz=dt.timezone.utc)
         self.cache.write()
 
         file_path = Path(self.temp_dir.name) / "test.json"
@@ -39,12 +44,13 @@ class CacheTestCase(unittest.TestCase):
 
     def test_read(self):
         self.cache.token = "123"
-        self.cache._paths[0] = Path(self.temp_dir.name)
+        self.cache.expires_at = dt.datetime.now(tz=dt.timezone.utc) + dt.timedelta(hours=5)
         self.cache.write()
 
-        result = self.cache.read()
-        self.assertEqual(result, {"server": self.cache.server, "token": "123"})
-        self.assertEqual(self.cache.token, "123")
+        new_cache = Cache(server=self.cache.server, email=self.cache.email, path=self.cache.path)
+        new_cache.read()
+        self.assertEqual(new_cache.token, "123")
+        self.assertIsNotNone(new_cache.expires_at)
 
 
 class ClientTestCase(unittest.TestCase):

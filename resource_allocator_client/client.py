@@ -3,14 +3,16 @@ Main Client class and Cache
 """
 
 from dataclasses import dataclass
+import datetime as dt
 import json
 import logging
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse, parse_qs
 import webbrowser
 
 import requests as req
+
+from resource_allocator_client.callback import run_callback_server
 
 logger = logging.getLogger(__name__)
 
@@ -29,41 +31,71 @@ class Cache:
         token: str: token received by the server
     """
     server: str
+    email: str
     token: str = None
+    expires_at: dt.datetime = None
+    path: Path = None
 
-    _paths = [
-        Path("."),
-    ]
-
-    @property
-    def path(self):
-        return Path(self._paths[0]) / (self.server.replace("/", "") + ".json")
+    def __post_init__(self):
+        if not self.path:
+            self.path = Path(".") / (self.server.replace("/", "") + ".json")
+        else:
+            self.path = Path(self.path)
 
     def read(self):
         path = self.path
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as cur_path:
-                data = json.load(cur_path)
-            self.token = data["token"]
+        if not path.exists():
+            return
 
-        return data
+        with open(path, "r", encoding="utf-8") as cur_path:
+            try:
+                data = json.load(cur_path)
+            except Exception as e:
+                logger.error(f"Could not read cache: {e}")
+
+        expires_at = dt.datetime.fromisoformat(data["expires_at"])
+        if (
+            self.server == data["server"]
+            and self.email == data["email"]
+            and expires_at > dt.datetime.now(tz=dt.timezone.utc)
+        ):
+            self.token = data["token"]
+            self.expires_at = expires_at
+        else:
+            logger.info("Existing token expired or invalid")
 
     def write(self):
-        path = self.path
-        with open(path, "w", encoding="utf-8") as cur_path:
-            json.dump(self.__dict__, cur_path)
+        with open(self.path, "w", encoding="utf-8") as cur_file:
+            data = self.__dict__.copy()
+            data["path"] = str(data["path"])
+            data["expires_at"] = data["expires_at"].isoformat()
+            json.dump(data, cur_file)
+
+    def update_from_login(self, data: dict):
+        self.expires_at = (
+            dt.datetime.fromisoformat(data["expires_at"])
+            if "expires_at" in data and data.get("expires_at")
+            else dt.datetime.now(tz=dt.timezone.utc) + dt.timedelta(hours=1)
+        )
+        self.token = data["token"]
+        self.write()
 
 
 class Client:
     """
     Resource Allocator Client class to handle all API operations
     """
+
+    redirect_hostname = "localhost"
+    redirect_port = 8080
+
     def __init__(
         self,
         server: str,
         email: str,
         password: str | None = None,
         azure_login: bool = False,
+        cache_path: str | None = None,
     ):
         """
         Initialize the client. Either password or azure_login must be set
@@ -87,13 +119,14 @@ class Client:
         self.email = email
         self.password = password
         self.azure_login = azure_login
-        self.cache = Cache(server=self.server)
+        self.cache = Cache(server=self.server, email=email, path=cache_path)
 
     def _make_request(
         self,
         method: str,
         endpoint: str,
         id: int | None = None,
+        params: dict | None = None,
         **data,
     ) -> req.PreparedRequest:
         """
@@ -118,6 +151,7 @@ class Client:
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.cache.token}",
             },
+            params=params,
             json=data,
             timeout=60,
         )
@@ -146,9 +180,11 @@ class Client:
             dict[str, Any]: API response
         """
         if self.azure_login:
-            return self._register_azure(**data)
+            result = self._register_azure(**data)
+        else:
+            result = self._register_email(**data)
 
-        return self._register_email(**data)
+        self.cache.update_from_login(result)
 
     def _register_azure(self, **data) -> dict[str, Any]:
         raise NotImplementedError()
@@ -165,8 +201,6 @@ class Client:
             logger.error("Bad register result")
             return result
 
-        self.cache.token = result["token"]
-        self.cache.write()
         return result
 
     def login(self) -> dict[str, Any]:
@@ -179,18 +213,26 @@ class Client:
         Returns:
             dict[str, Any]: API response
         """
-        if self.azure_login:
-            return self._login_azure()
+        #   Try reading the cache
+        self.cache.read()
+        if self.cache.token:
+            logger.info("Using valid cache")
+            return
 
-        return self._login_email(email=self.email, password=self.password)
+        if self.azure_login:
+            result = self._login_azure()
+        else:
+            result = self._login_email(email=self.email, password=self.password)
+
+        self.cache.update_from_login(result)
 
     def _login_azure(self):
-        #   TODO: split later
-
         #   Get auth URL and redirect
+        redirect_uri = f"http://{self.redirect_hostname}:{self.redirect_port}"
         login_init = self._make_request(
             method="GET",
             endpoint="login_azure",
+            params={"redirect_uri": redirect_uri},
         )
         auth_url = login_init["auth_url"]
 
@@ -198,16 +240,15 @@ class Client:
         if not webbrowser.open(auth_url):
             print(f"Please visit the following URL: {auth_url}")
 
-        url = urlparse(input("Paste redirect URL: "))
-        code = parse_qs(url.query)["code"][0]
+        code = run_callback_server(hostname=self.redirect_hostname, port=self.redirect_port)
+
         login_finish = self._make_request(
             method="POST",
             endpoint="login_azure",
             code=code,
             email=self.email,
+            redirect_uri=redirect_uri,
         )
-        self.cache.token = login_finish["token"]
-        self.cache.write()
         return login_finish
 
     def _login_email(self, email: str, password: str) -> dict[str, Any]:
@@ -221,8 +262,6 @@ class Client:
             logger.error("Bad log-in response")
             return result
 
-        self.cache.token = result["token"]
-        self.cache.write()
         return result
 
     def list_items(self, endpoint: str) -> list[dict[str, Any]]:
