@@ -153,7 +153,7 @@ class Client:
             },
             params=params,
             json=data,
-            timeout=60,
+            timeout=10,
         )
         if not result.ok:
             try:
@@ -323,9 +323,9 @@ class Client:
         Returns:
             dict[str, Any]: API response
         """
-        query_result = self.query(endpoint=endpoint, **data)
-        if query_result:
-            return query_result[0]
+        # query_result = self.query(endpoint=endpoint, **data)
+        # if query_result:
+        #     return query_result[0]
 
         result = self._make_request(method="POST", endpoint=endpoint, id=None, **data)
         return result

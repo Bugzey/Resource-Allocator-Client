@@ -46,6 +46,7 @@ class Parser:
         nargs=1,
         choices=[
             "allocation",
+            "auto_allocation",
             "images",
             "image_properties",
             "iterations",
@@ -236,31 +237,39 @@ def main() -> None:
         formatter.format(client.register(**args.data))
         return
 
+    #   Check odd args
+    if args.endpoint == "auto_allocation" and args.action != "create":
+        raise ValueError("Endpoint auto_allocation is only valid for create action")
+
     login_result = client.login()
 
     if args.action == "login":
-        formatter.format(login_result)
+        result = login_result
 
     elif args.action == "list":
-        formatter.format(client.list_items(endpoint=args.endpoint))
+        result = client.list_items(endpoint=args.endpoint)
 
     elif args.action == "get":
-        formatter.format(client.get(endpoint=args.endpoint, id=args.id))
+        result = client.get(endpoint=args.endpoint, id=args.id)
 
     elif args.action == "query":
-        formatter.format(client.query(endpoint=args.endpoint, **args.data))
+        result = client.query(endpoint=args.endpoint, **args.data)
 
     elif args.action == "create":
-        formatter.format(client.create(endpoint=args.endpoint, **args.data))
+        if args.endpoint == "auto_allocation":
+            args.endpoint = "allocation/automatic_allocation"
+        result = client.create(endpoint=args.endpoint, **args.data)
 
     elif args.action == "delete":
-        formatter.format(client.delete(endpoint=args.endpoint, id=args.id))
+        result = client.delete(endpoint=args.endpoint, id=args.id)
 
     elif args.action == "update":
-        formatter.format(client.update(endpoint=args.endpoint, id=args.id, **args.data))
+        result = client.update(endpoint=args.endpoint, id=args.id, **args.data)
 
     else:
         raise ValueError(f"Invalid action: {args.action}")
+
+    formatter.format(result)
 
 
 if __name__ == "__main__":
