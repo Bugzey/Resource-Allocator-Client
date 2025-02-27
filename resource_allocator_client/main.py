@@ -43,7 +43,7 @@ class Parser:
     #   Command subparsers
     _endpoint_kwargs = dict(
         dest="endpoint",
-        nargs=1,
+        nargs="?",
         choices=[
             "allocation",
             "auto_allocation",
@@ -220,9 +220,6 @@ def main() -> None:
     if "data" in dir(args):
         args.data = parser_factory.parse_data_args(args.data)
 
-    if "endpoint" in dir(args):
-        args.endpoint = args.endpoint[0]
-
     formatter = JsonFormatter()
 
     client = Client(
@@ -238,7 +235,7 @@ def main() -> None:
         return
 
     #   Check odd args
-    if args.endpoint == "auto_allocation" and args.action != "create":
+    if "endpoint" in args and args.endpoint == "auto_allocation" and args.action != "create":
         raise ValueError("Endpoint auto_allocation is only valid for create action")
 
     login_result = client.login()
