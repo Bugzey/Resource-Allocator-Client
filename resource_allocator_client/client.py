@@ -148,6 +148,7 @@ class Client:
             method=method,
             url=url,
             headers={
+                "Accept": "application/json",
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.cache.token}",
             },
@@ -169,7 +170,11 @@ class Client:
 
         return result.json()
 
-    def register(self, **data) -> dict[str, Any]:
+    def register(
+        self,
+        first_name: str | None = None,
+        last_name: str | None = None,
+    ) -> dict[str, Any]:
         """
         Register in a server using email-password login OR Azure Active Directory login
 
@@ -180,22 +185,26 @@ class Client:
             dict[str, Any]: API response
         """
         if self.azure_login:
-            result = self._register_azure(**data)
+            result = self._register_azure()
         else:
-            result = self._register_email(**data)
+            result = self._register_email(first_name=first_name, last_name=last_name)
 
         self.cache.update_from_login(result)
 
     def _register_azure(self, **data) -> dict[str, Any]:
         raise NotImplementedError()
 
-    def _register_email(self, **data) -> dict[str, Any]:
+    def _register_email(self, first_name: str, last_name: str) -> dict[str, Any]:
+        if not first_name or not last_name:
+            raise ValueError("Email registration requires first_name and last_name")
+
         result = self._make_request(
             method="POST",
             endpoint="register",
             email=self.email,
             password=self.password,
-            **data,
+            first_name=first_name,
+            last_name=last_name,
         )
         if "token" not in result:
             logger.error("Bad register result")
