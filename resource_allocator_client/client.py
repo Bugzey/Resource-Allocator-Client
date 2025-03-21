@@ -7,6 +7,7 @@ import datetime as dt
 import json
 import logging
 from pathlib import Path
+import re
 from typing import Any
 import webbrowser
 
@@ -36,11 +37,20 @@ class Cache:
     expires_at: dt.datetime = None
     path: Path = None
 
+    @staticmethod
+    def _replace_chars(value: str) -> str:
+        chars = re.escape(r'<>:/\|?*')
+        pattern = f"[{chars}]+"
+        result = re.sub(pattern, "_", value)
+        return result
+
     def __post_init__(self):
         if not self.path:
-            self.path = Path(".") / (self.server.replace("/", "") + ".json")
-        else:
+            self.path = Path(".") / (self._replace_chars(self.server) + ".json")
+        elif isinstance(self.path, str):
             self.path = Path(self.path)
+
+        self.path = self.path.parent / self._replace_chars(self.path.name)
 
     def read(self):
         path = self.path

@@ -52,6 +52,12 @@ class CacheTestCase(unittest.TestCase):
         self.assertEqual(new_cache.token, "123")
         self.assertIsNotNone(new_cache.expires_at)
 
+    def test_replace_chars(self):
+        self.assertEqual(
+            Cache._replace_chars("http://127.0.0.1:5000/.json"),
+            "http_127.0.0.1_5000_.json",
+        )
+
 
 class ClientTestCase(unittest.TestCase):
     def setUp(self):
