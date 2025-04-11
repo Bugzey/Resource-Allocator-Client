@@ -54,6 +54,7 @@ class Parser:
             "resource_groups",
             "resource_to_group",
             "resources",
+            "users",
         ],
     )
     _data_kwargs = dict(
