@@ -176,7 +176,7 @@ class Client:
                 f"Request returned a non-ok exit status: {result.status_code}: "
                 f"{content}"
             )
-            raise APIError(message)
+            return message
 
         return result.json()
 
