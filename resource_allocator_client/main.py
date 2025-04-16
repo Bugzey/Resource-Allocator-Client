@@ -43,7 +43,6 @@ class Parser:
     #   Command subparsers
     _endpoint_kwargs = dict(
         dest="endpoint",
-        nargs="?",
         choices=[
             "allocation",
             "auto_allocation",
