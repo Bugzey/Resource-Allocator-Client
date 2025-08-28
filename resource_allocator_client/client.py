@@ -243,6 +243,9 @@ class Client:
         else:
             result = self._login_email(email=self.email, password=self.password)
 
+        if not isinstance(result, dict) or "token" not in result:
+            raise APIError(f"Invalid login response: {result}")
+
         self.cache.update_from_login(result)
 
     def _login_azure(self):
@@ -277,10 +280,6 @@ class Client:
             email=email,
             password=password,
         )
-        if "token" not in result:
-            logger.error("Bad log-in response")
-            return result
-
         return result
 
     def list_items(self, endpoint: str) -> list[dict[str, Any]]:
