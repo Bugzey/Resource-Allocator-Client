@@ -81,6 +81,7 @@ class Parser:
         )
         parser.add_argument("-s", "--server", required=True, help="Server address")
         parser.add_argument("-e", "--email", required=True, help="User email")
+        parser.add_argument("-t", "--timeout", type=int, help="Request timeout", default=10)
 
         #   Auth group
         group = parser.add_mutually_exclusive_group()
@@ -124,6 +125,29 @@ class Parser:
     def _add_list(cls, subparsers: HasSubparsers) -> ArgumentParser:
         parser = subparsers.add_parser("list")
         parser.add_argument(**cls._endpoint_kwargs)
+        parser.add_argument(
+            "-l",
+            "--limit",
+            type=int,
+            help="Number of items to return",
+            default=200,
+        )
+        parser.add_argument(
+            "-o",
+            "--offset",
+            type=int,
+            help="Offset total result set",
+            default=0,
+        )
+        parser.add_argument(
+            "--order_by",
+            "--order-by",
+            type=lambda x: str(x).split(","),
+            help=(
+                "Comma-separated list of columns to order the result set by. Add '-' in front of a "
+                "colum name for descending order"
+            ),
+        )
         return parser
 
     @classmethod
@@ -228,6 +252,7 @@ def main() -> None:
         password=args.password,
         azure_login=args.azure_login,
         cache_path=args.cache,
+        request_timeout=args.timeout,
     )
 
     if args.action == "register":
@@ -244,7 +269,12 @@ def main() -> None:
         result = login_result
 
     elif args.action == "list":
-        result = client.list_items(endpoint=args.endpoint)
+        result = client.list_items(
+            endpoint=args.endpoint,
+            limit=args.limit,
+            offset=args.offset,
+            order_by=args.order_by,
+        )
 
     elif args.action == "get":
         result = client.get(endpoint=args.endpoint, id=args.id)

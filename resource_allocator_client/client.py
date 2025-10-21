@@ -106,6 +106,7 @@ class Client:
         password: str | None = None,
         azure_login: bool = False,
         cache_path: str | None = None,
+        request_timeout: int = 10
     ):
         """
         Initialize the client. Either password or azure_login must be set
@@ -122,7 +123,7 @@ class Client:
         ):
             raise ValueError("Either password or azure_login must be given")
 
-        if (not server.startswith("http://")) or (server.startswith("https://")):
+        if (not server.startswith("http://")) and (not server.startswith("https://")):
             server = f"https://{server}"
 
         self.server = server.rstrip("/")
@@ -130,6 +131,7 @@ class Client:
         self.password = password
         self.azure_login = azure_login
         self.cache = Cache(server=self.server, email=email, path=cache_path)
+        self.request_timeout = request_timeout
 
     def _make_request(
         self,
@@ -164,8 +166,9 @@ class Client:
             },
             params=params,
             json=data,
-            timeout=10,
+            timeout=self.request_timeout,
         )
+
         if not result.ok:
             try:
                 content = result.json()
@@ -176,7 +179,7 @@ class Client:
                 f"Request returned a non-ok exit status: {result.status_code}: "
                 f"{content}"
             )
-            return message
+            raise APIError(message)
 
         return result.json()
 
@@ -282,7 +285,13 @@ class Client:
         )
         return result
 
-    def list_items(self, endpoint: str) -> list[dict[str, Any]]:
+    def list_items(
+        self,
+        endpoint: str,
+        limit: int,
+        offset: int,
+        order_by: list[str],
+    ) -> list[dict[str, Any]]:
         """
         List items from an API endpoint
 
@@ -292,7 +301,19 @@ class Client:
         Returns:
             list[dict[str, Any]]: API response
         """
-        result = self._make_request(method="GET", endpoint=endpoint)
+        params = {
+            "limit": limit,
+            "offset": offset,
+            "order_by": order_by,
+        }
+        if order_by:
+            params["order_by"] = order_by
+
+        result = self._make_request(
+            method="GET",
+            endpoint=endpoint,
+            params=params,
+        )
         return result
 
     def get(self, endpoint: str, id: int) -> dict[str, Any]:
