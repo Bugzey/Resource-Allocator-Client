@@ -356,7 +356,7 @@ class Client:
         result = self._make_request(method="GET", endpoint=endpoint, id=id)
         return result
 
-    def create(self, endpoint: str, **data) -> dict[str, Any]:
+    def create(self, endpoint: str, id: int | None = None, **data) -> dict[str, Any]:
         """
         Create an item for an API endpoint
 
@@ -371,7 +371,7 @@ class Client:
         # if query_result:
         #     return query_result[0]
 
-        result = self._make_request(method="POST", endpoint=endpoint, id=None, **data)
+        result = self._make_request(method="POST", endpoint=endpoint, id=id, **data)
         return result
 
     def update(self, endpoint: str, id: int, **data) -> dict[str, Any]:

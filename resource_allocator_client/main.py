@@ -7,6 +7,7 @@ Command-line client to query the Resource-Allocator API application
 from abc import abstractmethod
 from argparse import ArgumentParser
 import base64
+from dataclasses import dataclass
 from getpass import getpass
 import json
 import logging
@@ -39,23 +40,67 @@ class HasSubparsers:
     def add_parser(self) -> ArgumentParser: ...
 
 
+@dataclass
+class Action:
+    """
+    Define an action that can be performed on a resource
+    """
+    name: str
+    method: str
+    endpoint: str | None = None
+    prepend_id: bool = False
+    resource: "Resource" = None
+
+    def __str__(self):
+        return self.name
+
+
+@dataclass
+class Resource:
+    """
+    Define a resource of the API
+    """
+    name: str
+    actions: list[Action]
+    endpoint: str | None = None
+
+    def __post_init__(self):
+        self.endpoint = self.endpoint or self.name
+        for action in self.actions:
+            action.resource = self
+
+
+def crud_actions() -> list[Action]:
+    result = [
+        Action("create", "POST", prepend_id=False),
+        Action("get", "GET", prepend_id=True),
+        Action("list", "GET", prepend_id=False),
+        Action("query", "GET", prepend_id=False),
+        Action("update", "PUT", prepend_id=True),
+        Action("delete", "DELETE", prepend_id=True),
+    ]
+    return result
+
+
 class Parser:
     #   Command subparsers
-    _endpoint_kwargs = dict(
-        dest="endpoint",
-        choices=[
-            "allocation",
-            "auto_allocation",
-            "images",
-            "image_properties",
-            "iterations",
-            "requests",
-            "resource_groups",
-            "resource_to_group",
-            "resources",
-            "users",
-        ],
-    )
+    _resources = [
+        Resource("allocations", endpoint="allocation", actions=[
+            *crud_actions(),
+            Action("auto_allocation", method="POST", endpoint="auto_allocation", prepend_id=True),
+        ]),
+        Resource("images", actions=crud_actions()),
+        Resource("image_properties", actions=crud_actions()),
+        Resource("iterations", actions=crud_actions()),
+        Resource("requests", actions=crud_actions()),
+        Resource("resource_groups", actions=crud_actions()),
+        Resource("resource_to_group", actions=crud_actions()),
+        Resource("resources", actions=crud_actions()),
+        Resource("users", actions=[
+            *crud_actions(),
+            Action(name="me", method="GET", endpoint="me", prepend_id=False),
+        ]),
+    ]
     _data_kwargs = dict(
         dest="data",
         nargs="*",
@@ -98,16 +143,13 @@ class Parser:
             dest="action",
             required=True,
         )
+        cls._add_register(subparsers)
+        cls._add_login(subparsers)
 
         #   Add separate subparsers
-        _ = cls._add_register(subparsers)
-        _ = cls._add_login(subparsers)
-        _ = cls._add_list(subparsers)
-        _ = cls._add_list(subparsers, dest="query")
-        _ = cls._add_get(subparsers)
-        _ = cls._add_create(subparsers)
-        _ = cls._add_delete(subparsers)
-        _ = cls._add_update(subparsers)
+        for resource in cls._resources:
+            _ = cls._add_resource(subparsers, resource)
+
         return parser
 
     @classmethod
@@ -122,9 +164,21 @@ class Parser:
         return parser
 
     @classmethod
-    def _add_list(cls, subparsers: HasSubparsers, dest: str = "list") -> ArgumentParser:
-        parser = subparsers.add_parser(dest)
-        parser.add_argument(**cls._endpoint_kwargs)
+    def _add_resource(cls, subparsers: HasSubparsers, resource: Resource) -> ArgumentParser:
+        parser = subparsers.add_parser(resource.name)
+        parser.resource = resource
+        parser.add_argument(
+            dest="action",
+            choices=resource.actions,
+            type=lambda x: next(item for item in resource.actions if item.name == x),
+        )
+        parser = cls._add_list_options(parser)
+        parser.add_argument(**cls._data_kwargs)
+        parser.add_argument("--id", help="Resource identifier if needed", type=int)
+        return parser
+
+    @classmethod
+    def _add_list_options(cls, parser: ArgumentParser) -> ArgumentParser:
         parser.add_argument(
             "-l",
             "--limit",
@@ -140,7 +194,6 @@ class Parser:
             default=0,
         )
         parser.add_argument(
-            "--order_by",
             "--order-by",
             type=lambda x: str(x).split(","),
             help=(
@@ -148,36 +201,6 @@ class Parser:
                 "colum name for descending order"
             ),
         )
-        parser.add_argument(**cls._data_kwargs)
-        return parser
-
-    @classmethod
-    def _add_get(cls, subparsers: HasSubparsers) -> ArgumentParser:
-        parser = subparsers.add_parser("get")
-        parser.add_argument(**cls._endpoint_kwargs)
-        parser.add_argument(**cls._id_kwargs)
-        return parser
-
-    @classmethod
-    def _add_create(cls, subparsers: HasSubparsers) -> ArgumentParser:
-        parser = subparsers.add_parser("create")
-        parser.add_argument(**cls._endpoint_kwargs)
-        parser.add_argument(**cls._data_kwargs)
-        return parser
-
-    @classmethod
-    def _add_delete(cls, subparsers: HasSubparsers) -> ArgumentParser:
-        parser = subparsers.add_parser("delete")
-        parser.add_argument(**cls._endpoint_kwargs)
-        parser.add_argument(**cls._id_kwargs)
-        return parser
-
-    @classmethod
-    def _add_update(cls, subparsers: HasSubparsers) -> ArgumentParser:
-        parser = subparsers.add_parser("update")
-        parser.add_argument(**cls._endpoint_kwargs)
-        parser.add_argument(**cls._id_kwargs)
-        parser.add_argument(**cls._data_kwargs)
         return parser
 
     @classmethod
@@ -253,42 +276,24 @@ def main() -> None:
         formatter.format(client.register(**args.data))
         return
 
-    #   Check odd args
-    if "endpoint" in args and args.endpoint == "auto_allocation" and args.action != "create":
-        raise ValueError("Endpoint auto_allocation is only valid for create action")
-
     login_result = client.login()
 
     if args.action == "login":
         result = login_result
 
-    elif args.action in ("list", "query"):
-        result = client.list_items(
-            endpoint=args.endpoint,
-            limit=args.limit,
-            offset=args.offset,
-            order_by=args.order_by,
-            **args.data,
-        )
+    #   Extract resource and action from argument parsing
+    action: Action = args.action
+    resource: Resource = action.resource
 
-    elif args.action == "get":
-        result = client.get(endpoint=args.endpoint, id=args.id)
-
-    elif args.action == "create":
-        if args.endpoint == "auto_allocation":
-            args.endpoint = "allocation/automatic_allocation"
-        result = client.create(endpoint=args.endpoint, **args.data)
-
-    elif args.action == "delete":
-        result = client.delete(endpoint=args.endpoint, id=args.id)
-
-    elif args.action == "update":
-        result = client.update(endpoint=args.endpoint, id=args.id, **args.data)
-
-    else:
-        raise ValueError(f"Invalid action: {args.action}")
-
+    result = client._make_request(
+        method=action.method,
+        endpoint=resource.endpoint,
+        id=args.id,
+        params={"limit": args.limit, "offset": args.offset, "order_by": args.order_by},
+        data=args.data
+    )
     formatter.format(result)
+    return
 
 
 if __name__ == "__main__":
