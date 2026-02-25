@@ -103,11 +103,11 @@ class Parser:
         _ = cls._add_register(subparsers)
         _ = cls._add_login(subparsers)
         _ = cls._add_list(subparsers)
+        _ = cls._add_list(subparsers, dest="query")
         _ = cls._add_get(subparsers)
         _ = cls._add_create(subparsers)
         _ = cls._add_delete(subparsers)
         _ = cls._add_update(subparsers)
-        _ = cls._add_query(subparsers)
         return parser
 
     @classmethod
@@ -122,8 +122,8 @@ class Parser:
         return parser
 
     @classmethod
-    def _add_list(cls, subparsers: HasSubparsers) -> ArgumentParser:
-        parser = subparsers.add_parser("list")
+    def _add_list(cls, subparsers: HasSubparsers, dest: str = "list") -> ArgumentParser:
+        parser = subparsers.add_parser(dest)
         parser.add_argument(**cls._endpoint_kwargs)
         parser.add_argument(
             "-l",
@@ -148,6 +148,7 @@ class Parser:
                 "colum name for descending order"
             ),
         )
+        parser.add_argument(**cls._data_kwargs)
         return parser
 
     @classmethod
@@ -176,13 +177,6 @@ class Parser:
         parser = subparsers.add_parser("update")
         parser.add_argument(**cls._endpoint_kwargs)
         parser.add_argument(**cls._id_kwargs)
-        parser.add_argument(**cls._data_kwargs)
-        return parser
-
-    @classmethod
-    def _add_query(cls, subparsers: HasSubparsers) -> ArgumentParser:
-        parser = subparsers.add_parser("query")
-        parser.add_argument(**cls._endpoint_kwargs)
         parser.add_argument(**cls._data_kwargs)
         return parser
 
@@ -268,19 +262,17 @@ def main() -> None:
     if args.action == "login":
         result = login_result
 
-    elif args.action == "list":
+    elif args.action in ("list", "query"):
         result = client.list_items(
             endpoint=args.endpoint,
             limit=args.limit,
             offset=args.offset,
             order_by=args.order_by,
+            **args.data,
         )
 
     elif args.action == "get":
         result = client.get(endpoint=args.endpoint, id=args.id)
-
-    elif args.action == "query":
-        result = client.query(endpoint=args.endpoint, **args.data)
 
     elif args.action == "create":
         if args.endpoint == "auto_allocation":

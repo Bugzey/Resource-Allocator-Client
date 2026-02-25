@@ -285,22 +285,12 @@ class Client:
         )
         return result
 
-    def list_items(
-        self,
-        endpoint: str,
+    @staticmethod
+    def _paginate(
         limit: int,
         offset: int,
         order_by: list[str],
-    ) -> list[dict[str, Any]]:
-        """
-        List items from an API endpoint
-
-        Args:
-            endpoint: str: address of the API endpoint
-
-        Returns:
-            list[dict[str, Any]]: API response
-        """
+    ) -> dict:
         params = {
             "limit": limit,
             "offset": offset,
@@ -309,11 +299,47 @@ class Client:
         if order_by:
             params["order_by"] = order_by
 
+        return params
+
+    def list_items(
+        self,
+        endpoint: str,
+        limit: int,
+        offset: int,
+        order_by: list[str],
+        **data,
+    ) -> list[dict[str, Any]]:
+        """
+        List items from an API endpoint with optional search terms. Search is handled client-side at
+        the moment.
+
+        Args:
+            endpoint: str: address of the API endpoint
+            limit: int: number of items to return
+            offset: int: query offset
+            order_by: list[str]: Comma-separated list of columns to order the result. Mark
+                descending by "-field"
+            data: dict: key-value pairs to query against. Return results only if all columns in the
+                given data object are equal to the respective columns of the object
+
+        Returns:
+            list[dict[str, Any]]: API response
+        """
         result = self._make_request(
             method="GET",
             endpoint=endpoint,
-            params=params,
+            params=self._paginate(limit=limit, offset=offset, order_by=order_by),
         )
+        if data:
+            result = [
+                item
+                for item
+                in result
+                if all((
+                    str(item.get(key)).casefold() == str(value).casefold()
+                    for key, value in data.items()
+                ))
+            ]
         return result
 
     def get(self, endpoint: str, id: int) -> dict[str, Any]:
@@ -329,27 +355,6 @@ class Client:
         """
         result = self._make_request(method="GET", endpoint=endpoint, id=id)
         return result
-
-    def query(self, endpoint: str, **data) -> list[dict[str, Any]]:
-        """
-        Query an endpoint for field values. Note: the API does not support this at the moment
-
-        Args:
-            endpoint: str: address of the API endpoint
-            data: dict: key-value pairs to query against. Return results only if all columns in the
-                given data object are equal to the respective columns of the object
-
-        Returns:
-            list[dict[str, Any]]: API response
-        """
-        items = self.list_items(endpoint)
-        return [
-            item for item in items
-            if all((
-                str(item.get(key)).casefold() == str(value).casefold()
-                for key, value in data.items()
-            ))
-        ]
 
     def create(self, endpoint: str, **data) -> dict[str, Any]:
         """
