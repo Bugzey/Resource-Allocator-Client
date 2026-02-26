@@ -208,7 +208,7 @@ class Client:
         else:
             url = f"{url}/"
 
-        result = req.request(
+        response = req.request(
             method=method,
             url=url,
             headers={
@@ -221,19 +221,32 @@ class Client:
             timeout=self.request_timeout,
         )
 
-        if not result.ok:
+        if not response.ok:
             try:
-                content = result.json()
+                content = response.json()
             except Exception:
-                content = result.content
+                content = response.content
 
             message = (
-                f"Request returned a non-ok exit status: {result.status_code}: "
+                f"Request returned a non-ok exit status: {response.status_code}: "
                 f"{content}"
             )
             raise APIError(message)
 
-        return result.json()
+        #   Temp? Client-side filtering
+        result = response.json()
+        if method == "GET" and data and isinstance(result, list):
+            result = [
+                item
+                for item
+                in result
+                if all((
+                    str(item.get(key)).casefold() == str(value).casefold()
+                    for key, value in data.items()
+                ))
+            ]
+
+        return result
 
     def make_request_from_action(
         self,
