@@ -7,14 +7,37 @@ Command-line client to query the Resource-Allocator API application
 from abc import abstractmethod
 from argparse import ArgumentParser
 import base64
-from dataclasses import dataclass
 from getpass import getpass
 import json
 import logging
 
-from resource_allocator_client.client import Client
+from resource_allocator_client.client import Client, Action, Resource
 
 logger = logging.getLogger(__name__)
+
+
+#   Define the API resources
+RESOURCES = [
+    Resource("allocations", endpoint="allocation", actions=[
+        *Action.get_crud_actions(),
+        Action("auto_allocation", method="POST", suffix="auto_allocation", prepend_id=True),
+    ]),
+    Resource("images", actions=Action.get_crud_actions()),
+    Resource("image_properties", actions=Action.get_crud_actions()),
+    Resource("iterations", actions=Action.get_crud_actions()),
+    Resource("requests", actions=[
+        *Action.get_crud_actions(),
+        Action("approve", method="POST", suffix="approve", prepend_id=True),
+        Action("decline", method="POST", suffix="decline", prepend_id=True),
+    ]),
+    Resource("resource_groups", actions=Action.get_crud_actions()),
+    Resource("resource_to_group", actions=Action.get_crud_actions()),
+    Resource("resources", actions=Action.get_crud_actions()),
+    Resource("users", actions=[
+        *Action.get_crud_actions(),
+        Action(name="me", method="GET", suffix="me", prepend_id=False),
+    ]),
+]
 
 
 class Formatter:
@@ -40,67 +63,8 @@ class HasSubparsers:
     def add_parser(self) -> ArgumentParser: ...
 
 
-@dataclass
-class Action:
-    """
-    Define an action that can be performed on a resource
-    """
-    name: str
-    method: str
-    endpoint: str | None = None
-    prepend_id: bool = False
-    resource: "Resource" = None
-
-    def __str__(self):
-        return self.name
-
-
-@dataclass
-class Resource:
-    """
-    Define a resource of the API
-    """
-    name: str
-    actions: list[Action]
-    endpoint: str | None = None
-
-    def __post_init__(self):
-        self.endpoint = self.endpoint or self.name
-        for action in self.actions:
-            action.resource = self
-
-
-def crud_actions() -> list[Action]:
-    result = [
-        Action("create", "POST", prepend_id=False),
-        Action("get", "GET", prepend_id=True),
-        Action("list", "GET", prepend_id=False),
-        Action("query", "GET", prepend_id=False),
-        Action("update", "PUT", prepend_id=True),
-        Action("delete", "DELETE", prepend_id=True),
-    ]
-    return result
-
-
 class Parser:
     #   Command subparsers
-    _resources = [
-        Resource("allocations", endpoint="allocation", actions=[
-            *crud_actions(),
-            Action("auto_allocation", method="POST", endpoint="auto_allocation", prepend_id=True),
-        ]),
-        Resource("images", actions=crud_actions()),
-        Resource("image_properties", actions=crud_actions()),
-        Resource("iterations", actions=crud_actions()),
-        Resource("requests", actions=crud_actions()),
-        Resource("resource_groups", actions=crud_actions()),
-        Resource("resource_to_group", actions=crud_actions()),
-        Resource("resources", actions=crud_actions()),
-        Resource("users", actions=[
-            *crud_actions(),
-            Action(name="me", method="GET", endpoint="me", prepend_id=False),
-        ]),
-    ]
     _data_kwargs = dict(
         dest="data",
         nargs="*",
@@ -110,7 +74,7 @@ class Parser:
     _id_kwargs = dict(dest="id", help="ID of the item")
 
     @classmethod
-    def make_parser(cls) -> ArgumentParser:
+    def make_parser(cls, resources: list[Resource]) -> ArgumentParser:
         """
         Create the argument parser for the program
 
@@ -147,7 +111,7 @@ class Parser:
         cls._add_login(subparsers)
 
         #   Add separate subparsers
-        for resource in cls._resources:
+        for resource in resources:
             _ = cls._add_resource(subparsers, resource)
 
         return parser
@@ -170,7 +134,7 @@ class Parser:
         parser.add_argument(
             dest="action",
             choices=resource.actions,
-            type=lambda x: next(item for item in resource.actions if item.name == x),
+            type=lambda x: next((item for item in resource.actions if item.name == x), None),
         )
         parser = cls._add_list_options(parser)
         parser.add_argument(**cls._data_kwargs)
@@ -184,18 +148,16 @@ class Parser:
             "--limit",
             type=int,
             help="Number of items to return",
-            default=200,
         )
         parser.add_argument(
             "-o",
             "--offset",
             type=int,
             help="Offset total result set",
-            default=0,
         )
         parser.add_argument(
             "--order-by",
-            type=lambda x: str(x).split(","),
+            type=lambda x: str(x).split(",") if x is not None else None,
             help=(
                 "Comma-separated list of columns to order the result set by. Add '-' in front of a "
                 "colum name for descending order"
@@ -252,7 +214,7 @@ def main() -> None:
         None
     """
     parser_factory = Parser()
-    parser = parser_factory.make_parser()
+    parser = parser_factory.make_parser(RESOURCES)
     args = parser.parse_args()
     if not args.password and not args.azure_login:
         args.password = getpass(f"Password for {args.email}: ")
@@ -283,15 +245,14 @@ def main() -> None:
 
     #   Extract resource and action from argument parsing
     action: Action = args.action
-    resource: Resource = action.resource
+    params = {
+        key: value
+        for key, value
+        in {"limit": args.limit, "offset": args.offset, "order_by": args.order_by}.items()
+        if value
+    }
+    result = client.make_request_from_action(action, id=args.id, params=params, **args.data)
 
-    result = client._make_request(
-        method=action.method,
-        endpoint=resource.endpoint,
-        id=args.id,
-        params={"limit": args.limit, "offset": args.offset, "order_by": args.order_by},
-        data=args.data
-    )
     formatter.format(result)
     return
 

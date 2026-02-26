@@ -8,7 +8,7 @@ import json
 import logging
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Self
 import webbrowser
 
 import requests as req
@@ -91,6 +91,51 @@ class Cache:
         self.write()
 
 
+@dataclass
+class Action:
+    """
+    Define an action that can be performed on a resource
+    """
+    name: str
+    method: str
+    suffix: str | None = None
+    prepend_id: bool = False
+    resource: "Resource" = None
+
+    def __str__(self):
+        return self.name
+
+    def __repr__(self):
+        return self.name
+
+    @classmethod
+    def get_crud_actions(cls) -> list[Self]:
+        result = [
+            Action("create", "POST", prepend_id=False),
+            Action("get", "GET", prepend_id=True),
+            Action("list", "GET", prepend_id=False),
+            Action("query", "GET", prepend_id=False),
+            Action("update", "PUT", prepend_id=True),
+            Action("delete", "DELETE", prepend_id=True),
+        ]
+        return result
+
+
+@dataclass
+class Resource:
+    """
+    Define a resource of the API
+    """
+    name: str
+    actions: list[Action]
+    endpoint: str | None = None
+
+    def __post_init__(self):
+        self.endpoint = self.endpoint or self.name
+        for action in self.actions:
+            action.resource = self
+
+
 class Client:
     """
     Resource Allocator Client class to handle all API operations
@@ -133,11 +178,12 @@ class Client:
         self.cache = Cache(server=self.server, email=email, path=cache_path)
         self.request_timeout = request_timeout
 
-    def _make_request(
+    def make_request(
         self,
         method: str,
         endpoint: str,
         id: int | None = None,
+        suffix: str | None = None,
         params: dict | None = None,
         **data,
     ) -> req.PreparedRequest:
@@ -151,10 +197,16 @@ class Client:
             data: dict: keyword arguments to pass in JSON form to the server
         """
         endpoint = endpoint.strip("/")
-        url = f"{self.server}/{endpoint}/"
+        url = f"{self.server}/{endpoint}"
 
-        if id:
-            url = f"{url}{id}"
+        if id and suffix:
+            url = f"{url}/{id}/{suffix}"
+        elif id:
+            url = f"{url}/{id}"
+        elif suffix:
+            url = f"{url}/{suffix}"
+        else:
+            url = f"{url}/"
 
         result = req.request(
             method=method,
@@ -182,6 +234,32 @@ class Client:
             raise APIError(message)
 
         return result.json()
+
+    def make_request_from_action(
+        self,
+        action: Action,
+        id: int | None = None,
+        params: dict | None = None,
+        **data,
+    ) -> dict:
+        """
+        Make a request from a defined Action object
+
+        Args:
+            action: Action to request from
+
+        Returns:
+            Dictionary of results
+        """
+        result = self.make_request(
+            method=action.method,
+            endpoint=action.resource.endpoint,
+            id=id if action.prepend_id else None,
+            suffix=action.suffix,
+            params=params if params and action.method == "GET" else None,
+            **data,
+        )
+        return result
 
     def register(
         self,
@@ -211,7 +289,7 @@ class Client:
         if not first_name or not last_name:
             raise ValueError("Email registration requires first_name and last_name")
 
-        result = self._make_request(
+        result = self.make_request(
             method="POST",
             endpoint="register",
             email=self.email,
@@ -254,7 +332,7 @@ class Client:
     def _login_azure(self):
         #   Get auth URL and redirect
         redirect_uri = f"http://{self.redirect_hostname}:{self.redirect_port}"
-        login_init = self._make_request(
+        login_init = self.make_request(
             method="GET",
             endpoint="login_azure",
             params={"redirect_uri": redirect_uri},
@@ -267,7 +345,7 @@ class Client:
 
         code = run_callback_server(hostname=self.redirect_hostname, port=self.redirect_port)
 
-        login_finish = self._make_request(
+        login_finish = self.make_request(
             method="POST",
             endpoint="login_azure",
             code=code,
@@ -277,7 +355,7 @@ class Client:
         return login_finish
 
     def _login_email(self, email: str, password: str) -> dict[str, Any]:
-        result = self._make_request(
+        result = self.make_request(
             method="POST",
             endpoint="login",
             email=email,
@@ -325,7 +403,7 @@ class Client:
         Returns:
             list[dict[str, Any]]: API response
         """
-        result = self._make_request(
+        result = self.make_request(
             method="GET",
             endpoint=endpoint,
             params=self._paginate(limit=limit, offset=offset, order_by=order_by),
@@ -353,7 +431,7 @@ class Client:
         Returns:
             dict[str, Any]: API response
         """
-        result = self._make_request(method="GET", endpoint=endpoint, id=id)
+        result = self.make_request(method="GET", endpoint=endpoint, id=id)
         return result
 
     def create(self, endpoint: str, id: int | None = None, **data) -> dict[str, Any]:
@@ -371,7 +449,7 @@ class Client:
         # if query_result:
         #     return query_result[0]
 
-        result = self._make_request(method="POST", endpoint=endpoint, id=id, **data)
+        result = self.make_request(method="POST", endpoint=endpoint, id=id, **data)
         return result
 
     def update(self, endpoint: str, id: int, **data) -> dict[str, Any]:
@@ -385,7 +463,7 @@ class Client:
         Returns:
             dict[str, Any]: API response
         """
-        result = self._make_request(method="PUT", endpoint=endpoint, id=id, **data)
+        result = self.make_request(method="PUT", endpoint=endpoint, id=id, **data)
         return result
 
     def delete(self, endpoint: str, id: int) -> None:
@@ -400,5 +478,5 @@ class Client:
         Returns:
             dict[str, Any]: API response
         """
-        result = self._make_request(method="DELETE", endpoint=endpoint, id=id)
+        result = self.make_request(method="DELETE", endpoint=endpoint, id=id)
         return result
