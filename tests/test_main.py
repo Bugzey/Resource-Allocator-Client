@@ -17,11 +17,10 @@ class MakeParserTestCase(unittest.TestCase):
     def test_create(self):
         result = self.parser.parse_args([
             *self.base_args,
-            "create", "resources", "name=bla", "top_resource_group_id=99",
+            "resources", "create", "name=bla", "top_resource_group_id=99",
             "invalid key=99%''\"====12", "quoted_text=\"there once was a time\"",
         ])
-        self.assertEqual(result.action, "create")
-        self.assertNotIn("id", dir(result))
+        self.assertEqual(str(result.action), "create")
         self.assertTrue(isinstance(result.data, list))
         self.assertTrue(isinstance(result.data[0], str))
         self.assertEqual(result.data[0], "name=bla")
