@@ -11,9 +11,33 @@ from getpass import getpass
 import json
 import logging
 
-from resource_allocator_client.client import Client
+from resource_allocator_client.client import Client, Action, Resource
 
 logger = logging.getLogger(__name__)
+
+
+#   Define the API resources
+RESOURCES = [
+    Resource("allocations", endpoint="allocation", actions=[
+        *Action.get_crud_actions(),
+        Action("auto_allocation", method="POST", suffix="auto_allocation", prepend_id=True),
+    ]),
+    Resource("images", actions=Action.get_crud_actions()),
+    Resource("image_properties", actions=Action.get_crud_actions()),
+    Resource("iterations", actions=Action.get_crud_actions()),
+    Resource("requests", actions=[
+        *Action.get_crud_actions(),
+        Action("approve", method="POST", suffix="approve", prepend_id=True),
+        Action("decline", method="POST", suffix="decline", prepend_id=True),
+    ]),
+    Resource("resource_groups", actions=Action.get_crud_actions()),
+    Resource("resource_to_group", actions=Action.get_crud_actions()),
+    Resource("resources", actions=Action.get_crud_actions()),
+    Resource("users", actions=[
+        *Action.get_crud_actions(),
+        Action(name="me", method="GET", suffix="me", prepend_id=False),
+    ]),
+]
 
 
 class Formatter:
@@ -41,21 +65,6 @@ class HasSubparsers:
 
 class Parser:
     #   Command subparsers
-    _endpoint_kwargs = dict(
-        dest="endpoint",
-        choices=[
-            "allocation",
-            "auto_allocation",
-            "images",
-            "image_properties",
-            "iterations",
-            "requests",
-            "resource_groups",
-            "resource_to_group",
-            "resources",
-            "users",
-        ],
-    )
     _data_kwargs = dict(
         dest="data",
         nargs="*",
@@ -65,7 +74,7 @@ class Parser:
     _id_kwargs = dict(dest="id", help="ID of the item")
 
     @classmethod
-    def make_parser(cls) -> ArgumentParser:
+    def make_parser(cls, resources: list[Resource]) -> ArgumentParser:
         """
         Create the argument parser for the program
 
@@ -98,16 +107,13 @@ class Parser:
             dest="action",
             required=True,
         )
+        cls._add_register(subparsers)
+        cls._add_login(subparsers)
 
         #   Add separate subparsers
-        _ = cls._add_register(subparsers)
-        _ = cls._add_login(subparsers)
-        _ = cls._add_list(subparsers)
-        _ = cls._add_list(subparsers, dest="query")
-        _ = cls._add_get(subparsers)
-        _ = cls._add_create(subparsers)
-        _ = cls._add_delete(subparsers)
-        _ = cls._add_update(subparsers)
+        for resource in resources:
+            _ = cls._add_resource(subparsers, resource)
+
         return parser
 
     @classmethod
@@ -122,62 +128,41 @@ class Parser:
         return parser
 
     @classmethod
-    def _add_list(cls, subparsers: HasSubparsers, dest: str = "list") -> ArgumentParser:
-        parser = subparsers.add_parser(dest)
-        parser.add_argument(**cls._endpoint_kwargs)
+    def _add_resource(cls, subparsers: HasSubparsers, resource: Resource) -> ArgumentParser:
+        parser = subparsers.add_parser(resource.name)
+        parser.resource = resource
+        parser.add_argument(
+            dest="action",
+            choices=resource.actions,
+            type=lambda x: next((item for item in resource.actions if item.name == x), None),
+        )
+        parser = cls._add_list_options(parser)
+        parser.add_argument(**cls._data_kwargs)
+        parser.add_argument("--id", help="Resource identifier if needed", type=int)
+        return parser
+
+    @classmethod
+    def _add_list_options(cls, parser: ArgumentParser) -> ArgumentParser:
         parser.add_argument(
             "-l",
             "--limit",
             type=int,
             help="Number of items to return",
-            default=200,
         )
         parser.add_argument(
             "-o",
             "--offset",
             type=int,
             help="Offset total result set",
-            default=0,
         )
         parser.add_argument(
-            "--order_by",
             "--order-by",
-            type=lambda x: str(x).split(","),
+            type=lambda x: str(x).split(",") if x is not None else None,
             help=(
                 "Comma-separated list of columns to order the result set by. Add '-' in front of a "
                 "colum name for descending order"
             ),
         )
-        parser.add_argument(**cls._data_kwargs)
-        return parser
-
-    @classmethod
-    def _add_get(cls, subparsers: HasSubparsers) -> ArgumentParser:
-        parser = subparsers.add_parser("get")
-        parser.add_argument(**cls._endpoint_kwargs)
-        parser.add_argument(**cls._id_kwargs)
-        return parser
-
-    @classmethod
-    def _add_create(cls, subparsers: HasSubparsers) -> ArgumentParser:
-        parser = subparsers.add_parser("create")
-        parser.add_argument(**cls._endpoint_kwargs)
-        parser.add_argument(**cls._data_kwargs)
-        return parser
-
-    @classmethod
-    def _add_delete(cls, subparsers: HasSubparsers) -> ArgumentParser:
-        parser = subparsers.add_parser("delete")
-        parser.add_argument(**cls._endpoint_kwargs)
-        parser.add_argument(**cls._id_kwargs)
-        return parser
-
-    @classmethod
-    def _add_update(cls, subparsers: HasSubparsers) -> ArgumentParser:
-        parser = subparsers.add_parser("update")
-        parser.add_argument(**cls._endpoint_kwargs)
-        parser.add_argument(**cls._id_kwargs)
-        parser.add_argument(**cls._data_kwargs)
         return parser
 
     @classmethod
@@ -229,7 +214,7 @@ def main() -> None:
         None
     """
     parser_factory = Parser()
-    parser = parser_factory.make_parser()
+    parser = parser_factory.make_parser(RESOURCES)
     args = parser.parse_args()
     if not args.password and not args.azure_login:
         args.password = getpass(f"Password for {args.email}: ")
@@ -253,42 +238,23 @@ def main() -> None:
         formatter.format(client.register(**args.data))
         return
 
-    #   Check odd args
-    if "endpoint" in args and args.endpoint == "auto_allocation" and args.action != "create":
-        raise ValueError("Endpoint auto_allocation is only valid for create action")
-
     login_result = client.login()
 
     if args.action == "login":
         result = login_result
 
-    elif args.action in ("list", "query"):
-        result = client.list_items(
-            endpoint=args.endpoint,
-            limit=args.limit,
-            offset=args.offset,
-            order_by=args.order_by,
-            **args.data,
-        )
-
-    elif args.action == "get":
-        result = client.get(endpoint=args.endpoint, id=args.id)
-
-    elif args.action == "create":
-        if args.endpoint == "auto_allocation":
-            args.endpoint = "allocation/automatic_allocation"
-        result = client.create(endpoint=args.endpoint, **args.data)
-
-    elif args.action == "delete":
-        result = client.delete(endpoint=args.endpoint, id=args.id)
-
-    elif args.action == "update":
-        result = client.update(endpoint=args.endpoint, id=args.id, **args.data)
-
-    else:
-        raise ValueError(f"Invalid action: {args.action}")
+    #   Extract resource and action from argument parsing
+    action: Action = args.action
+    params = {
+        key: value
+        for key, value
+        in {"limit": args.limit, "offset": args.offset, "order_by": args.order_by}.items()
+        if value
+    }
+    result = client.make_request_from_action(action, id=args.id, params=params, **args.data)
 
     formatter.format(result)
+    return
 
 
 if __name__ == "__main__":
